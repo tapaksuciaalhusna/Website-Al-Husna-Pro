@@ -42,6 +42,14 @@
     $('#portalIdentity').textContent=`${profile?.kontingen_name||user.email} · ${profile?.role||'kontingen'}`;
     $$('.admin-only').forEach(el=>el.hidden=!isAdmin());
     await loadChampionships();await renderTab('athletes');$('#portal').scrollIntoView({behavior:'smooth'});
+    await continuePendingRegistration();
+  }
+  async function continuePendingRegistration(){
+    const championshipId=localStorage.getItem('alp_pending_championship');
+    if(!championshipId||!user)return;
+    localStorage.removeItem('alp_pending_championship');
+    await renderTab('registrations');
+    await registrationForm(championshipId);
   }
   function leavePortal(){ $('#portal').hidden=true;$('#kejuaraan').hidden=false;$('#fitur').hidden=false;$('#alur').hidden=false;$('#kontak').hidden=false; }
   async function refreshSession(){
@@ -91,10 +99,11 @@
     $$('[data-upload]',root).forEach(b=>b.onclick=()=>uploadForm(b.dataset.upload));
     $$('[data-status]',root).forEach(sel=>sel.onchange=async()=>{const {error}=await client.from('registrations').update({status:sel.value}).eq('id',sel.dataset.status);notice(error?sayError(error):'Status pendaftaran diperbarui.',error?'error':'success')});
   }
-  async function registrationForm(){
+  async function registrationForm(selectedChampionshipId=null){
     const [{data:athletes,error:e1},{data:events,error:e2}]=await Promise.all([client.from('athletes').select('id,full_name').order('full_name'),client.from('championships').select('id,name').eq('status','open').order('start_date')]);if(e1||e2){notice(sayError(e1||e2),'error');return}
     if(!athletes?.length||!events?.length){notice('Pastikan sudah menambahkan atlet dan tersedia kejuaraan yang dibuka.','error');return}
     openData('Daftarkan atlet',`${selectField('Kejuaraan','championship_id',events.map(x=>[x.id,x.name]))}${selectField('Atlet','athlete_id',athletes.map(x=>[x.id,x.full_name]))}<p class="meta">Pendaftaran akan tercatat atas nama kontingen Anda.</p>`,'registration');
+    if(selectedChampionshipId){const field=dataForm.elements.championship_id;if(field&&events.some(x=>x.id===selectedChampionshipId))field.value=selectedChampionshipId;}
   }
   function uploadForm(id){openData('Unggah dokumen dan bukti pembayaran',`<label>Jenis file<select name="kind" required><option value="payment">Bukti pembayaran</option><option value="document">Dokumen atlet</option></select></label><label>Pilih file<input name="file" type="file" required accept="image/*,.pdf"></label><p class="meta">Format gambar atau PDF, maksimal 8 MB.</p>`,'upload',id)}
   async function tabProfile(root){const p=profile;root.innerHTML=`<div class="panel"><h3>Informasi kontingen / perguruan</h3><form id="profileForm"><div class="field-grid">${formField('Nama kontingen','kontingen_name','text',true,`value="${escapeHTML(p.kontingen_name||'')}"`)}${formField('Nama pengelola','manager_name','text',true,`value="${escapeHTML(p.manager_name||'')}"`)}${formField('Nomor HP / WhatsApp','phone','tel',false,`value="${escapeHTML(p.phone||'')}"`)}${formField('Kota / Kabupaten','city','text',false,`value="${escapeHTML(p.city||'')}"`)}${formField('Provinsi','province','text',false,`value="${escapeHTML(p.province||'')}"`)}</div><button class="btn" type="submit">Simpan profil</button></form><p class="meta">Email akun: ${escapeHTML(user.email)}</p></div>`;$('#profileForm').onsubmit=async e=>{e.preventDefault();const d=Object.fromEntries(new FormData(e.currentTarget));const {error}=await client.from('profiles').update(d).eq('id',user.id);notice(error?sayError(error):'Profil berhasil diperbarui.',error?'error':'success');if(!error)await loadProfile()}}
@@ -120,13 +129,23 @@
   authForm.onsubmit=async e=>{e.preventDefault();if(!client){authMsg('Konfigurasi Supabase belum lengkap. Isi config.js terlebih dahulu.','error');return}const d=Object.fromEntries(new FormData(authForm));$('#authSubmit').disabled=true;authMsg('Memproses…');try{
     if(authMode==='signup'){
       const {data,error}=await client.auth.signUp({email:d.email,password:d.password,options:{data:{kontingen_name:d.kontingen,manager_name:d.manager,phone:d.phone},emailRedirectTo:location.origin+location.pathname}});if(error)throw error;
-      if(data.session){user=data.user;await loadProfile();authDialog.close();await enterPortal()}else authMsg('Pendaftaran akun berhasil. Silakan periksa email untuk verifikasi, lalu masuk.','success');
+      if(data.session){user=data.user;await loadProfile();authDialog.close();await enterPortal()}else authMsg('Akun berhasil dibuat. Silakan verifikasi email, lalu masuk menggunakan akun tersebut. Kejuaraan yang dipilih akan tetap tersimpan.','success');
     }else{const {data,error}=await client.auth.signInWithPassword({email:d.email,password:d.password});if(error)throw error;user=data.user;await loadProfile();authDialog.close();await enterPortal()}
   }catch(err){authMsg(sayError(err),'error')}finally{$('#authSubmit').disabled=false}};
   $('#authSwitch').onclick=()=>showAuth(authMode==='login'?'signup':'login');$('#accountBtn').onclick=()=>user?enterPortal():showAuth('login');$('#authClose').onclick=()=>authDialog.close();$('#dataClose').onclick=()=>dataDialog.close();dataForm.onsubmit=saveData;$('#logoutBtn').onclick=async()=>{await client.auth.signOut();user=null;profile=null;leavePortal();location.hash='#top'};
   $$('.portal-tabs .chip').forEach(b=>b.onclick=()=>renderTab(b.dataset.tab));
   $$('.chip[data-f]').forEach(b=>b.onclick=()=>{$$('.chip[data-f]').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));renderPublic(championships)});
-  $('#cards').onclick=e=>{const b=e.target.closest('[data-register]');if(!b)return;if(!user){showAuth('login');authMsg('Masuk atau buat akun kontingen untuk mendaftarkan atlet.');return}renderTab('registrations').then(()=>registrationForm())};
+  $('#cards').onclick=e=>{
+    const b=e.target.closest('[data-register]');if(!b)return;
+    const championshipId=b.dataset.register;
+    if(!user){
+      localStorage.setItem('alp_pending_championship',championshipId);
+      showAuth('login');
+      authMsg('Untuk mendaftar kejuaraan ini, silakan masuk. Belum punya akun? Pilih “Daftar kontingen” di bawah.');
+      return;
+    }
+    renderTab('registrations').then(()=>registrationForm(championshipId));
+  };
   $('#contactBtn').href=`https://wa.me/${cfg.ADMIN_WHATSAPP||'6281234567890'}?text=${encodeURIComponent('Halo, saya ingin memakai Al Husna Pro untuk kejuaraan kami.')}`;
   if(client){client.auth.onAuthStateChange((_event,session)=>{if(session&&!user){user=session.user;setTimeout(async()=>{try{await loadProfile();await enterPortal()}catch(e){notice(sayError(e),'error')}},0)}else if(!session&&user){user=null;profile=null;leavePortal()}})}
   loadChampionships();refreshSession();
