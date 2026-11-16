@@ -161,6 +161,8 @@
     }else{const {data,error}=await client.auth.signInWithPassword({email:d.email,password:d.password});if(error)throw error;user=data.user;await loadProfile();authDialog.close();await enterPortal()}
   }catch(err){authMsg(sayError(err),'error')}finally{$('#authSubmit').disabled=false}};
   $('#authSwitch').onclick=()=>showAuth(authMode==='login'?'signup':'login');$('#accountBtn').onclick=()=>user?enterPortal():showAuth('login');$('#authClose').onclick=()=>authDialog.close();$('#dataClose').onclick=()=>dataDialog.close();dataForm.onsubmit=saveData;$('#logoutBtn').onclick=async()=>{await client.auth.signOut();user=null;profile=null;leavePortal();location.hash='#top'};
+  // Saat portal aktif, bagian publik disembunyikan. Tampilkan kembali sebelum mengikuti tautan navigasi header.
+  $('header').addEventListener('click',e=>{const link=e.target.closest('a[href^="#"]');if(link&&!$('#portal').hidden)leavePortal()});
   $$('.portal-tabs .chip').forEach(b=>b.onclick=()=>renderTab(b.dataset.tab));
   $$('.chip[data-f]').forEach(b=>b.onclick=()=>{$$('.chip[data-f]').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));renderPublic(championships)});
   $('#cards').onclick=e=>{
