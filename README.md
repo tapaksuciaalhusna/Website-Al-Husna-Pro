@@ -14,3 +14,9 @@
 5. Untuk nomor beregu/ganda/trio, kontingen memilih anggota tim sekaligus. Tapak Suci beregu tangan kosong/bersenjata divalidasi harus campuran putera-puteri; tanding bebas beregu harus satu regu putera atau satu regu puteri.
 
 Catatan: rentang berat badan kelas tidak diisi otomatis karena harus mengikuti juknis resmi masing-masing kejuaraan. Admin wajib mengisinya sebelum membuka pendaftaran.
+
+## Pendaftaran multi-peserta & flyer publik (pembaruan)
+1. Jalankan `migration_pendaftaran_multi.sql` satu kali di Supabase SQL Editor (setelah `migration_kejuaraan.sql`).
+2. **Daftarkan peserta**: pilih kejuaraan, lalu untuk setiap peserta isi nomor pertandingan, kelompok usia, kelas tanding (khusus nomor Tanding; kelas disarankan otomatis dari berat badan bila batas kelas sudah diisi admin), serta data atlet. Klik **+ Tambah peserta** untuk menambah banyak peserta sekaligus, lalu **Simpan** sekali. Nomor ganda/trio/beregu otomatis menampilkan jumlah anggota yang sesuai.
+3. Atlet yang sama persis (nama + tanggal lahir) dipakai ulang, tidak digandakan. Atlet tersimpan bisa dipilih langsung di tiap baris.
+4. **Flyer** yang diunggah admin tampil sebagai gambar di kartu kejuaraan untuk semua pengunjung (klik untuk memperbesar). Flyer PDF tampil sebagai tautan.
