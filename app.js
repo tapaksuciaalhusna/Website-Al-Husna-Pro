@@ -15,7 +15,7 @@
   const isAdmin=()=>['admin','super_admin'].includes(profile?.role);
   const fmtDate=v=>v?new Date(v+'T00:00:00').toLocaleDateString('id-ID'):'-';
   const statusLabel=v=>({open:'Dibuka',upcoming:'Segera dibuka',closed:'Ditutup',pending:'Menunggu verifikasi',verified:'Terverifikasi',rejected:'Perlu perbaikan'})[v]||v||'-';
-  const AGE_GROUPS=['Pra Usia Dini','Usia Dini 1','Usia Dini 2','Pra Remaja','Remaja','Dewasa','Master'];
+  const AGE_GROUPS=['Pra Usia Dini 1','Pra Usia Dini 2','Usia Dini 1','Usia Dini 2','Pra Remaja','Remaja','Dewasa','Master'];
   const RULE_CATEGORIES={
     IPSI:['Tanding','Seni Tunggal IPSI','Seni Ganda IPSI','Seni Regu IPSI'],
     TAPAK_SUCI:['Tanding Perorangan','Tanding Bebas Beregu','Tunggal Tangan Kosong','Tunggal Bersenjata','Ganda Tangan Kosong','Ganda Bersenjata','Trio Tangan Kosong','Trio Bersenjata','Beregu Tangan Kosong','Beregu Bersenjata','Jurus']
@@ -23,6 +23,10 @@
   const publicAsset=path=>path?client.storage.from('championship-assets').getPublicUrl(path).data.publicUrl:'';
   const isTanding=v=>/^Tanding/.test(v);
   const isGroupCategory=v=>/Ganda|Trio|Beregu/.test(v)||v==='Jurus';
+  const needsClass=v=>v==='Tanding'||v==='Tanding Perorangan';
+  const defaultWeightClasses=()=>['A','B','C','D','E','F','G','H','I','J','Bebas'].map(n=>({name:n,min_kg:'',max_kg:'',label:n}));
+  const configIsEmpty=c=>!(c&&Array.isArray(c.categories)&&c.categories.length);
+  const effectiveConfig=c=>{const raw=c||{},rule=RULE_CATEGORIES[raw.ruleset]?raw.ruleset:'IPSI';return{ruleset:rule,categories:raw.categories?.length?raw.categories:RULE_CATEGORIES[rule],age_groups:raw.age_groups?.length?raw.age_groups:AGE_GROUPS,weight_classes:raw.weight_classes?.length?raw.weight_classes:defaultWeightClasses()}};
   const defaultWeightLines=()=>['A','B','C','D','E','F','G','H','I','J','Bebas'].map(x=>x+'| | ').join('\n');
   function renderPublic(list){
     const cards=$('#cards'); if(!cards)return;
@@ -118,11 +122,11 @@
       client.from('championships').select('id,name,competition_config').eq('status','open').order('start_date')]);
     if(e1||e2){notice(sayError(e1||e2),'error');return}
     if(!events?.length){notice('Belum ada kejuaraan yang dibuka pendaftarannya.','error');return}
-    const saved=athletes||[];let seq=0,event=events.find(x=>x.id===selectedChampionshipId)||null;
+    const saved=athletes||[];let seq=0,event=events.find(x=>x.id===selectedChampionshipId)||(events.length===1?events[0]:null);
     const newMember=()=>({athlete_id:'',name:'',birth:'',gender:'',bb:''});
     const newEntry=(from)=>{const e={id:++seq,category:from?.category||'',age:from?.age||'',weight:from?.weight||'',weightTouched:false,size:from?.size||1,members:[]};const n=e.size;for(let i=0;i<n;i++)e.members.push(newMember());return e};
     let entries=[newEntry()];
-    const cfgOf=()=>event?.competition_config||{};
+    const cfgOf=()=>effectiveConfig(event?.competition_config);
     const opts=events.map(x=>`<option value="${x.id}" ${event&&x.id===event.id?'selected':''}>${escapeHTML(x.name)}</option>`).join('');
     openData('Pendaftaran peserta',`<div class="field-grid"><label>Kejuaraan<select name="championship_id" required><option value="">Pilih kejuaraan</option>${opts}</select></label>${formField('Nama pelatih / pendamping (opsional)','coach_name','text',false,'')}${formField('Nomor HP pelatih / manajer (opsional)','phone','tel',false,`value="${escapeHTML(profile?.phone||'')}"`)}</div><p class="meta">Isi data peserta lengkap dengan nomor pertandingan, kelompok usia, dan kelas tanding. Klik <b>+ Tambah peserta</b> untuk mendaftarkan banyak peserta sekaligus, lalu tekan Simpan satu kali.</p><div id="regEntries"></div><div class="reg-actions"><button type="button" class="btn ghost sm" id="addEntry">+ Tambah peserta</button><span class="meta" id="regCount"></span></div>`,'registration-multi');
     const box=$('#regEntries'),champSel=dataForm.elements.championship_id;
@@ -134,12 +138,12 @@
       return `<div class="reg-member"><b class="reg-member-t">${group?'Anggota':'Peserta'} ${i+1}</b>${ex}<div class="field-grid"><label>Nama lengkap<input required data-eid="${e.id}" data-mi="${i}" data-f="name" value="${escapeHTML(m.name)}" autocomplete="off"></label><label>Tanggal lahir<input type="date" required data-eid="${e.id}" data-mi="${i}" data-f="birth" value="${escapeHTML(m.birth)}"></label><label>Jenis kelamin<select required data-eid="${e.id}" data-mi="${i}" data-f="gender">${optList([['Putra','Putra'],['Putri','Putri']],m.gender,'Pilih')}</select></label><label>Berat badan (kg)<input type="number" step="0.1" min="10" max="150" required data-eid="${e.id}" data-mi="${i}" data-f="bb" value="${escapeHTML(m.bb)}"></label></div></div>`;
     }
     function entryHTML(e,idx){
-      const cfg=cfgOf(),cats=cfg.categories||[],ages=cfg.age_groups||[],cls=cfg.weight_classes||[],sizes=allowedSizes(e.category),tanding=e.category==='Tanding';
+      const dis=event?'':'disabled',cfg=cfgOf(),cats=event?cfg.categories:[],ages=event?cfg.age_groups:[],cls=event?cfg.weight_classes:[],sizes=allowedSizes(e.category),tanding=needsClass(e.category);
       const clsOpts=cls.map(w=>[w.name,w.label||w.name+(w.min_kg!==''&&w.max_kg!==''?` (${w.min_kg}–${w.max_kg} kg)`:'')]);
       const hint=tanding?(()=>{const s=suggestClass(e.members[0]?.bb);return s?`Sesuai berat badan: kelas ${escapeHTML(s.name)}`:''})():'';
-      return `<fieldset class="reg-entry" data-entry="${e.id}"><div class="reg-entry-head"><b>Pendaftaran #${idx+1}</b>${entries.length>1?`<button type="button" class="small-btn danger" data-del-entry="${e.id}">Hapus</button>`:''}</div><div class="field-grid"><label>Nomor pertandingan<select required data-eid="${e.id}" data-f="category">${optList(cats.map(x=>[x,x]),e.category,'Pilih nomor')}</select></label><label>Kelompok usia<select required data-eid="${e.id}" data-f="age">${optList(ages.map(x=>[x,x]),e.age,'Pilih kelompok usia')}</select></label>${tanding?`<label>Kelas tanding<select required data-eid="${e.id}" data-f="weight">${optList(clsOpts,e.weight,'Pilih kelas')}</select></label>`:''}${sizes.length>1?`<label>Jumlah peserta dalam nomor ini<select data-eid="${e.id}" data-f="size">${sizes.map(n=>`<option value="${n}" ${n===e.size?'selected':''}>${n} orang</option>`).join('')}</select></label>`:''}</div>${e.size>1?`<p class="meta">Satu regu/tim berisi ${e.size} anggota.${e.category==='Tanding Bebas Beregu'?' Harus satu regu putera saja atau satu regu puteri saja.':/^Beregu/.test(e.category)?' Harus campuran putera dan puteri.':''}</p>`:''}<p class="meta reg-hint" data-hint="${e.id}">${hint}</p>${e.members.map((m,i)=>memberHTML(e,m,i)).join('')}</fieldset>`;
+      return `<fieldset class="reg-entry" data-entry="${e.id}"><div class="reg-entry-head"><b>Pendaftaran #${idx+1}</b>${entries.length>1?`<button type="button" class="small-btn danger" data-del-entry="${e.id}">Hapus</button>`:''}</div>${event?'':'<p class="msg error">Pilih kejuaraan terlebih dahulu agar pilihan nomor pertandingan, kelompok usia, dan kelas tampil.</p>'}<div class="field-grid"><label>Nomor pertandingan<select required data-eid="${e.id}" data-f="category" ${dis}>${optList(cats.map(x=>[x,x]),e.category,'Pilih nomor')}</select></label><label>Kelompok usia<select required data-eid="${e.id}" data-f="age" ${dis}>${optList(ages.map(x=>[x,x]),e.age,'Pilih kelompok usia')}</select></label>${tanding?`<label>Kelas tanding<select required data-eid="${e.id}" data-f="weight">${optList(clsOpts,e.weight,'Pilih kelas')}</select></label>`:''}${sizes.length>1?`<label>Jumlah peserta dalam nomor ini<select data-eid="${e.id}" data-f="size">${sizes.map(n=>`<option value="${n}" ${n===e.size?'selected':''}>${n} orang</option>`).join('')}</select></label>`:''}</div>${e.size>1?`<p class="meta">Satu regu/tim berisi ${e.size} anggota.${e.category==='Tanding Bebas Beregu'?' Harus satu regu putera saja atau satu regu puteri saja.':/^Beregu/.test(e.category)?' Harus campuran putera dan puteri.':''}</p>`:''}<p class="meta reg-hint" data-hint="${e.id}">${hint}</p>${e.members.map((m,i)=>memberHTML(e,m,i)).join('')}</fieldset>`;
     }
-    const paint=()=>{box.innerHTML=entries.map(entryHTML).join('');const total=entries.reduce((s,e)=>s+e.members.length,0);$('#regCount').textContent=`${entries.length} pendaftaran · ${total} atlet`};
+    const paint=()=>{box.innerHTML=(event&&configIsEmpty(event.competition_config)?'<p class="msg error">Panitia belum menyimpan pengaturan nomor pertandingan untuk kejuaraan ini, jadi yang tampil adalah pilihan standar (kelas A sampai J dan Bebas tanpa batas berat). Hubungi panitia untuk memastikan kelas yang berlaku.</p>':'')+entries.map(entryHTML).join('');const total=entries.reduce((s,e)=>s+e.members.length,0);$('#regCount').textContent=`${entries.length} pendaftaran · ${total} atlet`};
     const resize=e=>{const n=e.size;while(e.members.length<n)e.members.push(newMember());e.members.length=n};
     champSel.onchange=()=>{event=events.find(x=>x.id===champSel.value)||null;entries=[newEntry()];paint()};
     $('#addEntry').onclick=()=>{const last=entries[entries.length-1];const n=newEntry(last&&{category:last.category,age:last.age,weight:last.weight,size:last.size});entries.push(n);paint();box.lastElementChild?.scrollIntoView({behavior:'smooth',block:'center'})};
@@ -152,9 +156,9 @@
       if(f==='weight'){e.weight=t.value;e.weightTouched=true;return}
       const m=e.members[Number(t.dataset.mi)];if(!m)return;
       if(f==='athlete_id'){m.athlete_id=t.value;const a=saved.find(x=>x.id===t.value);if(a){m.name=a.full_name;m.birth=a.birth_date||'';m.gender=a.gender||'';m.bb=a.weight_kg!=null?String(a.weight_kg):''}else{m.name='';m.birth='';m.gender='';m.bb=''}
-        if(e.category==='Tanding'&&!e.weightTouched){const s=suggestClass(m.bb);if(s)e.weight=s.name}paint();return}
+        if(needsClass(e.category)&&!e.weightTouched){const s=suggestClass(m.bb);if(s)e.weight=s.name}paint();return}
       m[f]=t.value;
-      if(f==='bb'&&e.category==='Tanding'){const s=suggestClass(t.value);const h=box.querySelector(`[data-hint="${e.id}"]`);if(h)h.textContent=s?`Sesuai berat badan: kelas ${s.name}`:'';if(s&&!e.weightTouched){e.weight=s.name;const sel=box.querySelector(`select[data-eid="${e.id}"][data-f="weight"]`);if(sel)sel.value=s.name}}
+      if(f==='bb'&&needsClass(e.category)){const s=suggestClass(t.value);const h=box.querySelector(`[data-hint="${e.id}"]`);if(h)h.textContent=s?`Sesuai berat badan: kelas ${s.name}`:'';if(s&&!e.weightTouched){e.weight=s.name;const sel=box.querySelector(`select[data-eid="${e.id}"][data-f="weight"]`);if(sel)sel.value=s.name}}
     };
     box.oninput=ev=>{const t=ev.target,f=t.dataset.f;if(!f||t.tagName==='SELECT')return;const e=entries.find(x=>x.id===Number(t.dataset.eid));const m=e?.members[Number(t.dataset.mi)];if(m){m[f]=t.value;if(m.athlete_id&&(f==='name'||f==='birth')){m.athlete_id='';const sel=box.querySelector(`select[data-eid="${e.id}"][data-mi="${t.dataset.mi}"][data-f="athlete_id"]`);if(sel)sel.value=''}}};
     regState={get:()=>({event,entries,saved,form:dataForm})};
@@ -165,7 +169,7 @@
     const {event,entries,saved}=regState.get(),fd=new FormData(dataForm);
     if(!event)throw new Error('Pilih kejuaraan terlebih dahulu.');
     if(!entries.length)throw new Error('Tambahkan minimal satu peserta.');
-    const cfg=event.competition_config||{},coach=String(fd.get('coach_name')||'').trim()||null,phone=String(fd.get('phone')||'').trim()||null;
+    const cfg=effectiveConfig(event.competition_config),coach=String(fd.get('coach_name')||'').trim()||null,phone=String(fd.get('phone')||'').trim()||null;
     const keyOf=m=>normName(m.name)+'|'+m.birth;
     const byKey=new Map(saved.map(a=>[normName(a.full_name)+'|'+a.birth_date,a.id]));
     const seen=new Set();
@@ -173,7 +177,7 @@
       const label=`Pendaftaran #${i+1}`;
       if(!e.category)throw new Error(`${label}: pilih nomor pertandingan.`);
       if(!e.age)throw new Error(`${label}: pilih kelompok usia.`);
-      if(e.category==='Tanding'&&!e.weight)throw new Error(`${label}: pilih kelas tanding.`);
+      if(needsClass(e.category)&&!e.weight)throw new Error(`${label}: pilih kelas tanding.`);
       if(e.members.length!==e.size)throw new Error(`${label}: jumlah peserta harus ${e.size} orang.`);
       const genders=new Set(e.members.map(m=>m.gender));
       if(e.category==='Tanding Bebas Beregu'&&genders.size!==1)throw new Error(`${label}: tanding bebas beregu harus satu regu putera saja atau satu regu puteri saja.`);
@@ -185,7 +189,7 @@
         if(names.has(keyOf(m)))throw new Error(`${label}: atlet ${m.name} dimasukkan dua kali dalam satu nomor.`);names.add(keyOf(m));
         const dup=e.category+'|'+keyOf(m);if(seen.has(dup))throw new Error(`Atlet ${m.name} dimasukkan dua kali pada nomor ${e.category}.`);seen.add(dup);
       });
-      if(e.category==='Tanding'){
+      if(needsClass(e.category)){
         const cl=(cfg.weight_classes||[]).find(x=>x.name===e.weight),lo=parseFloat(cl?.min_kg),hi=parseFloat(cl?.max_kg),w=parseFloat(e.members[0].bb);
         if(Number.isFinite(lo)&&Number.isFinite(hi)&&(w<lo||w>hi))throw new Error(`${label}: berat ${w} kg tidak masuk kelas ${cl.name} (${lo}–${hi} kg). Pilih kelas yang sesuai.`);
       }
@@ -203,7 +207,7 @@
     }
     // 2) daftarkan semua peserta ke kejuaraan sekaligus
     const rows=[];
-    entries.forEach(e=>{const gc=e.size>1?crypto.randomUUID():null;e.members.forEach(m=>{rows.push({championship_id:event.id,athlete_id:m.athlete_id||byKey.get(keyOf(m)),kontingen_id:user.id,status:'pending',competition_category:e.category,age_group:e.age,weight_class:e.category==='Tanding'?e.weight:null,group_code:gc,group_size:e.size})})});
+    entries.forEach(e=>{const gc=e.size>1?crypto.randomUUID():null;e.members.forEach(m=>{rows.push({championship_id:event.id,athlete_id:m.athlete_id||byKey.get(keyOf(m)),kontingen_id:user.id,status:'pending',competition_category:e.category,age_group:e.age,weight_class:needsClass(e.category)?e.weight:null,group_code:gc,group_size:e.size})})});
     const {error:regErr}=await client.from('registrations').insert(rows);
     if(regErr){
       if(createdIds.length)await client.from('athletes').delete().in('id',createdIds);
@@ -218,7 +222,7 @@
   function eventForm(c={}){
     const cfg=c.competition_config||{},rule=cfg.ruleset||'IPSI',categories=cfg.categories||RULE_CATEGORIES[rule],ages=cfg.age_groups||AGE_GROUPS;
     const categoryChecks=(r,selected)=>RULE_CATEGORIES[r].map(x=>`<label class="check-option"><input type="checkbox" name="event_categories" value="${escapeHTML(x)}" ${selected.includes(x)?'checked':''}> ${escapeHTML(x)}</label>`).join('');
-    openData(c.id?'Edit kejuaraan':'Tambah kejuaraan',`<div class="field-grid">${formField('Nama kejuaraan','name','text',true,`value="${escapeHTML(c.name||'')}"`)}${formField('Tanggal mulai','start_date','date',true,`value="${c.start_date||''}"`)}${formField('Tanggal selesai','end_date','date',false,`value="${c.end_date||''}"`)}${formField('Batas pendaftaran','registration_deadline','date',false,`value="${c.registration_deadline||''}"`)}${formField('Lokasi','location','text',false,`value="${escapeHTML(c.location||'')}"`)}${selectField('Status','status',[['upcoming','Segera dibuka'],['open','Dibuka'],['closed','Ditutup']])}</div><label>Deskripsi<textarea name="description" rows="3">${escapeHTML(c.description||'')}</textarea></label><hr><h3>Dokumen kejuaraan</h3><div class="field-grid"><label>Flyer kejuaraan (gambar/PDF)<input name="flyer_file" type="file" accept="image/*,.pdf"></label><label>Juknis kejuaraan (PDF)<input name="guide_file" type="file" accept="application/pdf,.pdf"></label></div><p class="meta">Maksimal 12 MB per file. Kosongkan jika tidak ingin mengganti file yang sudah ada.</p><hr><h3>Pengaturan peraturan dan nomor pertandingan</h3>${selectField('Peraturan yang digunakan','ruleset', [['IPSI','Peraturan IPSI'],['TAPAK_SUCI','Peraturan Tapak Suci']])}<div id="categoryChoices" class="check-grid">${categoryChecks(rule,categories)}</div><h4>Kelompok usia tanding</h4><div class="check-grid">${AGE_GROUPS.map(x=>`<label class="check-option"><input type="checkbox" name="event_ages" value="${x}" ${ages.includes(x)?'checked':''}> ${x}</label>`).join('')}</div><h4>Kelas berat tanding</h4><p class="meta">Isi batas berat resmi sesuai juknis kejuaraan. Format satu baris: <b>Nama kelas|min kg|max kg</b>. Jangan isi angka perkiraan jika belum ditetapkan panitia.</p><textarea name="weight_classes" rows="7" placeholder="A|39|42&#10;B|42|45&#10;...&#10;J|...|...&#10;Bebas||">${escapeHTML((cfg.weight_classes||[]).map(x=>`${x.name}|${x.min_kg??''}|${x.max_kg??''}`).join('\n')||defaultWeightLines())}</textarea>`, 'championship',c.id||null);
+    openData(c.id?'Edit kejuaraan':'Tambah kejuaraan',`<div class="field-grid">${formField('Nama kejuaraan','name','text',true,`value="${escapeHTML(c.name||'')}"`)}${formField('Tanggal mulai','start_date','date',true,`value="${c.start_date||''}"`)}${formField('Tanggal selesai','end_date','date',false,`value="${c.end_date||''}"`)}${formField('Batas pendaftaran','registration_deadline','date',false,`value="${c.registration_deadline||''}"`)}${formField('Lokasi','location','text',false,`value="${escapeHTML(c.location||'')}"`)}${selectField('Status','status',[['upcoming','Segera dibuka'],['open','Dibuka'],['closed','Ditutup']])}</div><label>Deskripsi<textarea name="description" rows="3">${escapeHTML(c.description||'')}</textarea></label><hr><h3>Dokumen kejuaraan</h3><div class="field-grid"><label>Flyer kejuaraan (gambar/PDF)<input name="flyer_file" type="file" accept="image/*,.pdf"></label><label>Juknis kejuaraan (PDF)<input name="guide_file" type="file" accept="application/pdf,.pdf"></label></div><p class="meta">Maksimal 12 MB per file. Kosongkan jika tidak ingin mengganti file yang sudah ada.</p><hr><h3>Pengaturan peraturan dan nomor pertandingan</h3>${selectField('Peraturan yang digunakan','ruleset', [['IPSI','Peraturan IPSI'],['TAPAK_SUCI','Peraturan Tapak Suci']])}${c.id&&configIsEmpty(c.competition_config)?'<p class="msg error">Pengaturan nomor pertandingan kejuaraan ini <b>belum pernah disimpan</b>. Centang yang diperlukan di bawah ini, lalu tekan Simpan agar pilihannya tampil bagi kontingen.</p>':''}<div id="categoryChoices" class="check-grid">${categoryChecks(rule,categories)}</div><h4>Kelompok usia tanding</h4><div class="check-grid">${AGE_GROUPS.map(x=>`<label class="check-option"><input type="checkbox" name="event_ages" value="${x}" ${ages.includes(x)?'checked':''}> ${x}</label>`).join('')}</div><h4>Kelas berat tanding</h4><p class="meta">Isi batas berat resmi sesuai juknis kejuaraan. Format satu baris: <b>Nama kelas|min kg|max kg</b>. Jangan isi angka perkiraan jika belum ditetapkan panitia.</p><textarea name="weight_classes" rows="7" placeholder="A|39|42&#10;B|42|45&#10;...&#10;J|...|...&#10;Bebas||">${escapeHTML((cfg.weight_classes||[]).map(x=>`${x.name}|${x.min_kg??''}|${x.max_kg??''}`).join('\n')||defaultWeightLines())}</textarea>`, 'championship',c.id||null);
     if(c.status)dataForm.elements.status.value=c.status;dataForm.elements.ruleset.value=rule;
     const renderChecks=(r,selected)=>{$('#categoryChoices').innerHTML=categoryChecks(r,selected)};
     dataForm.elements.ruleset.onchange=()=>renderChecks(dataForm.elements.ruleset.value,RULE_CATEGORIES[dataForm.elements.ruleset.value]);
@@ -240,6 +244,8 @@
       } else if(editingType==='championship'){
         const ruleset=payload.ruleset;const categories=fd.getAll('event_categories');const ageGroups=fd.getAll('event_ages');const weightClasses=String(payload.weight_classes||'').split(/\r?\n/).map(line=>line.trim()).filter(Boolean).map(line=>{const parts=line.split('|').map(x=>x.trim());return {name:parts[0],min_kg:parts[1]||'',max_kg:parts[2]||'',label:parts[1]&&parts[2]?`${parts[1]}–${parts[2]} kg`:parts[0]}});
         if(!categories.length)throw new Error('Pilih minimal satu kategori pertandingan.');
+        if(!ageGroups.length)throw new Error('Pilih minimal satu kelompok usia.');
+        if(categories.some(needsClass)&&!weightClasses.length)throw new Error('Isi minimal satu kelas berat untuk nomor tanding.');
         payload.competition_config={ruleset,categories,age_groups:ageGroups,weight_classes:weightClasses};delete payload.ruleset;delete payload.event_categories;delete payload.event_ages;delete payload.weight_classes;delete payload.flyer_file;delete payload.guide_file;
         let saved;if(editingId){({data:saved,error}=await client.from('championships').update(payload).eq('id',editingId).select('id').single())}else{({data:saved,error}=await client.from('championships').insert(payload).select('id').single())}if(error)throw error;
         for(const [field,col] of [['flyer_file','flyer_path'],['guide_file','technical_guide_path']]){const file=fd.get(field);if(file?.size){if(file.size>12*1024*1024)throw new Error('Ukuran flyer/juknis maksimal 12 MB.');const safe=file.name.replace(/[^a-zA-Z0-9._-]/g,'_');const path=`${saved.id}/${col}/${crypto.randomUUID()}-${safe}`;const {error:upErr}=await client.storage.from('championship-assets').upload(path,file,{upsert:false,contentType:file.type||'application/octet-stream'});if(upErr)throw upErr;const {error:updateErr}=await client.from('championships').update({[col]:path}).eq('id',saved.id);if(updateErr)throw updateErr}}
