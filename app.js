@@ -47,7 +47,7 @@
     if(error)throw error;profile=data;
   }
   async function enterPortal(){
-    $('#portal').hidden=false;$('#kejuaraan').hidden=true;$('#fitur').hidden=true;$('#alur').hidden=true;$('#kontak').hidden=true;
+    $('#portal').hidden=false;$$('.public-section').forEach(el=>el.hidden=true);
     $('#portalIdentity').textContent=`${profile?.kontingen_name||user.email} · ${profile?.role||'kontingen'}`;
     $$('.admin-only').forEach(el=>el.hidden=!isAdmin());
     await loadChampionships();await renderTab('athletes');$('#portal').scrollIntoView({behavior:'smooth'});
@@ -60,7 +60,7 @@
     await renderTab('registrations');
     await registrationForm(championshipId);
   }
-  function leavePortal(){ $('#portal').hidden=true;$('#kejuaraan').hidden=false;$('#fitur').hidden=false;$('#alur').hidden=false;$('#kontak').hidden=false; }
+  function leavePortal(){ $('#portal').hidden=true;$$('.public-section').forEach(el=>el.hidden=false); }
   async function refreshSession(){
     if(!client){notice('Supabase belum dikonfigurasi. Isi SUPABASE_ANON_KEY di config.js setelah menyalin key publik dari Supabase.','error');return}
     const {data:{session}}=await client.auth.getSession();

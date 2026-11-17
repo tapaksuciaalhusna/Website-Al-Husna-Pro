@@ -1,5 +1,11 @@
 # Website-Al-Husna-Pro
 
+## Pembaruan tampilan (gaya aplikasi digital scoring)
+- `index.html`: desain baru (latar hitam gradasi, garis emas, panel hitam, kolom nilai kuning dan biru). Semua `id`, `class`, dan `data-*` yang dipakai `app.js` tetap sama.
+- `assets/`: tiga gambar contoh tampilan TV skor (`tv-mode3-*.webp`) untuk bagian "Tampilan TV skor". Folder ini harus ikut diunggah ke GitHub.
+- `app.js`: hanya dua baris (`enterPortal` dan `leavePortal`) diubah agar semua seksi publik (kelas `public-section`) disembunyikan saat portal dibuka.
+- Dihapus: catatan lama "Data kejuaraan di atas masih contoh" dan footer ganda.
+
 ## Penyempurnaan alur pendaftaran kontingen
 - Tombol Daftar atlet menyimpan kejuaraan yang dipilih sebelum login/registrasi.
 - Pengunjung dapat beralih dari Masuk ke Daftar kontingen melalui dialog autentikasi.
@@ -15,8 +21,8 @@
 
 Catatan: rentang berat badan kelas tidak diisi otomatis karena harus mengikuti juknis resmi masing-masing kejuaraan. Admin wajib mengisinya sebelum membuka pendaftaran.
 
-## Pendaftaran multi-peserta & flyer publik (pembaruan)
+## Pendaftaran multi-peserta & flyer publik
 1. Jalankan `migration_pendaftaran_multi.sql` satu kali di Supabase SQL Editor (setelah `migration_kejuaraan.sql`).
-2. **Daftarkan peserta**: pilih kejuaraan, lalu untuk setiap peserta isi nomor pertandingan, kelompok usia, kelas tanding (khusus nomor Tanding; kelas disarankan otomatis dari berat badan bila batas kelas sudah diisi admin), serta data atlet. Klik **+ Tambah peserta** untuk menambah banyak peserta sekaligus, lalu **Simpan** sekali. Nomor ganda/trio/beregu otomatis menampilkan jumlah anggota yang sesuai.
-3. Atlet yang sama persis (nama + tanggal lahir) dipakai ulang, tidak digandakan. Atlet tersimpan bisa dipilih langsung di tiap baris.
-4. **Flyer** yang diunggah admin tampil sebagai gambar di kartu kejuaraan untuk semua pengunjung (klik untuk memperbesar). Flyer PDF tampil sebagai tautan.
+2. Daftarkan peserta: pilih kejuaraan, isi nomor pertandingan, kelompok usia, kelas tanding, dan data atlet per peserta. Klik **+ Tambah peserta** untuk banyak peserta sekaligus, lalu Simpan sekali.
+3. Atlet dengan nama + tanggal lahir yang sama dipakai ulang, tidak digandakan.
+4. Flyer yang diunggah admin tampil sebagai gambar di kartu kejuaraan untuk semua pengunjung (klik untuk memperbesar).
