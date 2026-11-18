@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Al Husna Pro</title>
+<script>
+/* GitHub Pages tidak punya aturan "semua alamat -> index.html". File ini menyimpan alamat yang diminta lalu mengarahkan ke halaman utama;
+   router.js memulihkan alamat itu. Di Netlify / Cloudflare Pages file ini tidak dipakai (lihat _redirects). */
+(function(){var R=['kejuaraan','layanan','tentang','masuk','portal'],seg=location.pathname.split('/').filter(Boolean),base='/';
+if(/\.github\.io$/i.test(location.hostname)&&seg.length&&R.indexOf(seg[0])<0)base='/'+seg[0]+'/';
+try{sessionStorage.setItem('alp_redirect',location.pathname+location.search+location.hash)}catch(e){}
+location.replace(base)})();
+</script></head><body style="background:#000;color:#f5f2ea;font-family:system-ui,sans-serif"><p style="padding:24px">Mengalihkan ke Al Husna Pro… <a href="/" style="color:#f7d57a">Klik di sini bila tidak berpindah.</a></p></body></html>

@@ -8,6 +8,10 @@
   const client = configured && window.supabase ? window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY) : null;
   const authDialog=$('#authDialog'), authForm=$('#authForm'), dataDialog=$('#dataDialog'), dataForm=$('#dataForm');
   let user=null, profile=null, authMode='login', activeTab='athletes', editingId=null, editingType=null, championships=[];
+  const syncAccountBtn=()=>{const b=$('#accountBtn');if(b)b.textContent=user?'Portal saya':'Masuk / Daftar'};
+  const wantsPortal=()=>window.ALP_ROUTER?window.ALP_ROUTER.wantsPortal():true;
+  // router.js dimuat setelah app.js: tunggu halaman selesai dimuat sebelum memutuskan apakah portal boleh langsung dibuka
+  const domReady=()=>document.readyState==='loading'?new Promise(r=>document.addEventListener('DOMContentLoaded',r,{once:true})):Promise.resolve();
   const notice=(msg,type='')=>{const el=$('#portalNotice');if(el){el.textContent=msg;el.className='msg '+type}};
   const authMsg=(msg,type='')=>{const el=$('#authMessage');el.textContent=msg;el.className='msg '+type};
   const dataMsg=(msg,type='')=>{const el=$('#dataMessage');el.textContent=msg;el.className='msg '+type};
@@ -28,17 +32,38 @@
   const configIsEmpty=c=>!(c&&Array.isArray(c.categories)&&c.categories.length);
   const effectiveConfig=c=>{const raw=c||{},rule=RULE_CATEGORIES[raw.ruleset]?raw.ruleset:'IPSI';return{ruleset:rule,categories:raw.categories?.length?raw.categories:RULE_CATEGORIES[rule],age_groups:raw.age_groups?.length?raw.age_groups:AGE_GROUPS,weight_classes:raw.weight_classes?.length?raw.weight_classes:defaultWeightClasses()}};
   const defaultWeightLines=()=>['A','B','C','D','E','F','G','H','I','J','Bebas'].map(x=>x+'| | ').join('\n');
+  /* ---- Kejuaraan publik: slug alamat, kartu, daftar ---- */
+  const slugify=v=>String(v||'').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,80)||'kejuaraan';
+  const assignSlugs=list=>{const used=new Map();list.forEach(c=>{const s=slugify(c.name),n=used.get(s)||0;used.set(s,n+1);c._slug=n?`${s}-${n+1}`:s})};
+  const publicStatusOf=c=>c.status==='open'?'buka':c.status==='upcoming'?'segera':'tutup';
+  let championshipsLoaded=false;
+  const cardHTML=c=>{
+    const flyer=publicAsset(c.flyer_path),guide=publicAsset(c.technical_guide_path),isPdf=/\.pdf$/i.test(c.flyer_path||'');
+    const flyerBlock=!flyer?'':(isPdf?`<a class="flyer-pdf" href="${flyer}" target="_blank" rel="noopener">📄 Lihat flyer (PDF)</a>`:`<button type="button" class="flyer-thumb" data-flyer="${escapeHTML(flyer)}" data-title="${escapeHTML(c.name)}" aria-label="Perbesar flyer ${escapeHTML(c.name)}"><img src="${flyer}" alt="Flyer ${escapeHTML(c.name)}" loading="lazy"></button>`);
+    const detailHref=window.alpHref?window.alpHref('/kejuaraan/'+c._slug):'#';
+    return `<article class="card">${flyerBlock}<span class="st ${c.publicStatus}">${statusLabel(c.status)}</span><h3><a class="clink" href="${detailHref}" data-link>${escapeHTML(c.name)}</a></h3><p class="meta">${fmtDate(c.start_date)}${c.end_date?' – '+fmtDate(c.end_date):''}<br>${escapeHTML(c.location||'-')}</p><p class="meta">Batas daftar: ${fmtDate(c.registration_deadline)}</p>${c.description?`<p>${escapeHTML(c.description)}</p>`:''}<p class="meta">${flyer&&!isPdf?`<a href="${flyer}" target="_blank" rel="noopener">Buka flyer ukuran penuh</a>`:''}${flyer&&!isPdf&&guide?' · ':''}${guide?`<a href="${guide}" target="_blank" rel="noopener">Unduh juknis</a>`:''}</p><div class="card-act"><a class="btn ghost" href="${detailHref}" data-link>Lihat detail</a><button class="btn" data-register="${c.id}" ${c.status!=='open'?'disabled':''}>${c.status==='open'?'Daftar atlet':c.status==='upcoming'?'Segera dibuka':'Ditutup'}</button></div></article>`;
+  };
   function renderPublic(list){
-    const cards=$('#cards'); if(!cards)return;
-    const filter=$('.chip[aria-pressed="true"]')?.dataset.f || 'semua';
-    const mapped=list.map(c=>({...c, publicStatus:c.status==='open'?'buka':c.status==='upcoming'?'segera':'tutup'})).filter(c=>filter==='semua'||c.publicStatus===filter);
-    cards.innerHTML=mapped.length?mapped.map(c=>{const flyer=publicAsset(c.flyer_path),guide=publicAsset(c.technical_guide_path),isPdf=/\.pdf$/i.test(c.flyer_path||''),flyerBlock=!flyer?'':(isPdf?`<a class="flyer-pdf" href="${flyer}" target="_blank" rel="noopener">📄 Lihat flyer (PDF)</a>`:`<button type="button" class="flyer-thumb" data-flyer="${escapeHTML(flyer)}" data-title="${escapeHTML(c.name)}" aria-label="Perbesar flyer ${escapeHTML(c.name)}"><img src="${flyer}" alt="Flyer ${escapeHTML(c.name)}" loading="lazy"></button>`);return `<article class="card">${flyerBlock}<span class="st ${c.publicStatus}">${statusLabel(c.status)}</span><h3>${escapeHTML(c.name)}</h3><p class="meta">${fmtDate(c.start_date)}${c.end_date?' – '+fmtDate(c.end_date):''}<br>${escapeHTML(c.location||'-')}</p><p class="meta">Batas daftar: ${fmtDate(c.registration_deadline)}</p>${c.description?`<p>${escapeHTML(c.description)}</p>`:''}<p class="meta">${flyer&&!isPdf?`<a href="${flyer}" target="_blank" rel="noopener">Buka flyer ukuran penuh</a>`:''}${flyer&&!isPdf&&guide?' · ':''}${guide?`<a href="${guide}" target="_blank" rel="noopener">Unduh juknis</a>`:''}</p><button class="btn" data-register="${c.id}" ${c.status!=='open'?'disabled':''}>${c.status==='open'?'Daftar atlet':'Pendaftaran tidak tersedia'}</button></article>`}).join(''):'<p class="meta">Belum ada kejuaraan pada kategori ini.</p>';
+    assignSlugs(list);
+    $$('[data-cards]').forEach(box=>{
+      let mapped=list.map(c=>({...c,publicStatus:publicStatusOf(c)}));
+      if(box.dataset.cards==='latest'){
+        // beranda: yang dibuka dulu, lalu segera dibuka, lalu yang sudah selesai; maksimal 3
+        const rank={buka:0,segera:1,tutup:2},t=c=>new Date(c.start_date).getTime()||0;
+        mapped=mapped.sort((a,b)=>(rank[a.publicStatus]-rank[b.publicStatus])||(a.publicStatus==='tutup'?t(b)-t(a):t(a)-t(b))).slice(0,3);
+      }else{
+        const filter=$('.chip[data-f][aria-pressed="true"]')?.dataset.f||'semua';
+        mapped=mapped.filter(c=>filter==='semua'||c.publicStatus===filter);
+      }
+      box.innerHTML=mapped.length?mapped.map(cardHTML).join(''):'<p class="meta">Belum ada kejuaraan pada kategori ini.</p>';
+    });
   }
   async function loadChampionships(){
-    if(!client){renderPublic([]);return}
+    const done=()=>{championshipsLoaded=true;window.dispatchEvent(new CustomEvent('alp:championships'))};
+    if(!client){renderPublic([]);done();return}
     const {data,error}=await client.from('championships').select('*').order('start_date',{ascending:true});
-    if(error){console.error(error);return}
-    championships=data||[];renderPublic(championships);
+    if(error){console.error(error);done();return}
+    championships=data||[];renderPublic(championships);done();
   }
   function showAuth(mode='login'){
     authMode=mode;$('#authTitle').textContent=mode==='signup'?'Daftar akun kontingen':'Masuk ke akun';$('#signupFields').hidden=mode!=='signup';
@@ -51,7 +76,7 @@
     if(error)throw error;profile=data;
   }
   async function enterPortal(){
-    $('#portal').hidden=false;$$('.public-section').forEach(el=>el.hidden=true);
+    $('#portal').hidden=false;$$('.public-section').forEach(el=>el.hidden=true);syncAccountBtn();window.dispatchEvent(new CustomEvent('alp:portal',{detail:true}));
     $('#portalIdentity').textContent=`${profile?.kontingen_name||user.email} · ${profile?.role||'kontingen'}`;
     $$('.admin-only').forEach(el=>el.hidden=!isAdmin());
     await loadChampionships();await renderTab('athletes');$('#portal').scrollIntoView({behavior:'smooth'});
@@ -64,11 +89,14 @@
     await renderTab('registrations');
     await registrationForm(championshipId);
   }
-  function leavePortal(){ $('#portal').hidden=true;$$('.public-section').forEach(el=>el.hidden=false); }
+  function leavePortal(){ $('#portal').hidden=true;syncAccountBtn();if(window.ALP_ROUTER)window.dispatchEvent(new CustomEvent('alp:portal',{detail:false}));else $$('.public-section').forEach(el=>el.hidden=false); }
+  let resolveReady;const ready=new Promise(r=>{resolveReady=r});
   async function refreshSession(){
-    if(!client){notice('Supabase belum dikonfigurasi. Isi SUPABASE_ANON_KEY di config.js setelah menyalin key publik dari Supabase.','error');return}
-    const {data:{session}}=await client.auth.getSession();
-    if(session){user=session.user;try{await loadProfile();await enterPortal()}catch(e){notice(sayError(e),'error')}}
+    try{
+      if(!client){notice('Supabase belum dikonfigurasi. Isi SUPABASE_ANON_KEY di config.js setelah menyalin key publik dari Supabase.','error');return}
+      const {data:{session}}=await client.auth.getSession();
+      if(session){user=session.user;syncAccountBtn();try{await loadProfile();await domReady();if(wantsPortal())await enterPortal()}catch(e){notice(sayError(e),'error')}}
+    }finally{resolveReady()}
   }
   async function uploadPrivate(file,folder){
     if(!file) return null;
@@ -258,7 +286,7 @@
   }
   authForm.onsubmit=async e=>{e.preventDefault();if(!client){authMsg('Konfigurasi Supabase belum lengkap. Isi config.js terlebih dahulu.','error');return}const d=Object.fromEntries(new FormData(authForm));$('#authSubmit').disabled=true;authMsg('Memproses…');try{
     if(authMode==='signup'){
-      const {data,error}=await client.auth.signUp({email:d.email,password:d.password,options:{data:{kontingen_name:d.kontingen,manager_name:d.manager,phone:d.phone},emailRedirectTo:location.origin+location.pathname}});if(error)throw error;
+      const {data,error}=await client.auth.signUp({email:d.email,password:d.password,options:{data:{kontingen_name:d.kontingen,manager_name:d.manager,phone:d.phone},emailRedirectTo:location.origin+(window.ALP_BASE||'/')}});if(error)throw error;
       if(data.session){user=data.user;await loadProfile();authDialog.close();await enterPortal()}else authMsg('Akun berhasil dibuat. Silakan verifikasi email, lalu masuk menggunakan akun tersebut. Kejuaraan yang dipilih akan tetap tersimpan.','success');
     }else{const {data,error}=await client.auth.signInWithPassword({email:d.email,password:d.password});if(error)throw error;user=data.user;await loadProfile();authDialog.close();await enterPortal()}
   }catch(err){authMsg(sayError(err),'error')}finally{$('#authSubmit').disabled=false}};
@@ -267,19 +295,23 @@
   $('header').addEventListener('click',e=>{const link=e.target.closest('a[href^="#"]');if(link&&!$('#portal').hidden)leavePortal()});
   $$('.portal-tabs .chip').forEach(b=>b.onclick=()=>renderTab(b.dataset.tab));
   $$('.chip[data-f]').forEach(b=>b.onclick=()=>{$$('.chip[data-f]').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));renderPublic(championships)});
-  $('#cards').onclick=e=>{
-    const fl=e.target.closest('[data-flyer]');if(fl){$('#flyerImg').src=fl.dataset.flyer;$('#flyerImg').alt='Flyer '+fl.dataset.title;$('#flyerTitle').textContent=fl.dataset.title;$('#flyerDialog').showModal();return}
-    const b=e.target.closest('[data-register]');if(!b)return;
-    const championshipId=b.dataset.register;
+  const startRegistration=async championshipId=>{
+    localStorage.setItem('alp_pending_championship',championshipId);
     if(!user){
-      localStorage.setItem('alp_pending_championship',championshipId);
       showAuth('login');
       authMsg('Untuk mendaftar kejuaraan ini, silakan masuk. Belum punya akun? Pilih “Daftar kontingen” di bawah.');
       return;
     }
-    renderTab('registrations').then(()=>registrationForm(championshipId));
+    await enterPortal(); // enterPortal melanjutkan ke formulir pendaftaran kejuaraan yang dipilih
   };
+  $('main').addEventListener('click',e=>{
+    const fl=e.target.closest('[data-flyer]');if(fl){$('#flyerImg').src=fl.dataset.flyer;$('#flyerImg').alt='Flyer '+fl.dataset.title;$('#flyerTitle').textContent=fl.dataset.title;$('#flyerDialog').showModal();return}
+    const b=e.target.closest('[data-register]');if(!b||b.disabled)return;
+    startRegistration(b.dataset.register);
+  });
   $('#contactBtn').href=`https://wa.me/${cfg.ADMIN_WHATSAPP||'6281234567890'}?text=${encodeURIComponent('Halo, saya ingin memakai Al Husna Pro untuk kejuaraan kami.')}`;
-  if(client){client.auth.onAuthStateChange((_event,session)=>{if(session&&!user){user=session.user;setTimeout(async()=>{try{await loadProfile();await enterPortal()}catch(e){notice(sayError(e),'error')}},0)}else if(!session&&user){user=null;profile=null;leavePortal()}})}
+  if(client){client.auth.onAuthStateChange((_event,session)=>{if(session&&!user){user=session.user;syncAccountBtn();setTimeout(async()=>{try{await loadProfile();await domReady();if(wantsPortal())await enterPortal()}catch(e){notice(sayError(e),'error')}},0)}else if(!session&&user){user=null;profile=null;leavePortal()}})}
+  window.ALP={getChampionships:()=>championships,isLoaded:()=>championshipsLoaded,publicAsset,escapeHTML,fmtDate,statusLabel,effectiveConfig,configIsEmpty,showAuth,hasUser:()=>!!user,openPortal:()=>enterPortal(),leavePortal,ready,whatsapp:cfg.ADMIN_WHATSAPP||''};
+  syncAccountBtn();
   loadChampionships();refreshSession();
 })();
