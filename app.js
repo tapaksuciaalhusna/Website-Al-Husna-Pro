@@ -15,7 +15,14 @@
   const notice=(msg,type='')=>{const el=$('#portalNotice');if(el){el.textContent=msg;el.className='msg '+type}};
   const authMsg=(msg,type='')=>{const el=$('#authMessage');el.textContent=msg;el.className='msg '+type};
   const dataMsg=(msg,type='')=>{const el=$('#dataMessage');el.textContent=msg;el.className='msg '+type};
-  const sayError=e=>{const m=e?.message||'';if(e?.code==='23503'||/foreign key/i.test(m))return 'Data ini masih dipakai oleh data lain (misalnya pendaftaran atlet). Hapus data yang terkait terlebih dahulu.';return m||'Terjadi kesalahan. Silakan coba lagi.'};
+  const sayError=e=>{const m=e?.message||'';
+    if(e?.code==='23503'||/foreign key/i.test(m))return 'Data ini masih dipakai oleh data lain (misalnya pendaftaran atlet). Hapus data yang terkait terlebih dahulu.';
+    if(/mime type .* is not supported|invalid_mime_type/i.test(m))return 'Jenis file tidak didukung. Gunakan JPG, PNG, WebP, atau PDF.';
+    if(/exceeded the maximum allowed size|payload too large|entity too large/i.test(m))return 'Ukuran file melebihi batas 8 MB. Kecilkan file lalu coba lagi.';
+    if(/bucket not found/i.test(m))return 'Penyimpanan berkas belum siap. Hubungi panitia.';
+    if(/row-level security|permission denied|not authorized|invalid jwt/i.test(m))return 'Tindakan ditolak oleh pengaturan akses. Pastikan Anda sudah masuk dan pendaftaran kejuaraan masih dibuka; jika masih gagal, keluar lalu masuk kembali.';
+    if(/failed to fetch|networkerror|load failed|network request failed/i.test(m))return 'Koneksi terputus. Periksa internet lalu coba lagi.';
+    return m||'Terjadi kesalahan. Silakan coba lagi.'};
   const isAdmin=()=>['admin','super_admin'].includes(profile?.role);
   const fmtDate=v=>v?new Date(v+'T00:00:00').toLocaleDateString('id-ID'):'-';
   const statusLabel=v=>({open:'Dibuka',upcoming:'Segera dibuka',closed:'Ditutup',pending:'Menunggu verifikasi',verified:'Terverifikasi',rejected:'Perlu perbaikan'})[v]||v||'-';
@@ -112,24 +119,44 @@
   // Tagihan: perorangan dihitung per baris; ganda/trio/regu dihitung sekali per tim (group_code).
   const billable=(rows,cfg)=>{const seen=new Set();let total=0,items=0;rows.forEach(r=>{if(r.group_code){if(seen.has(r.group_code))return;seen.add(r.group_code)}total+=feeOf(cfg,r.competition_category);items++});return{total,items}};
   const todayISO=()=>new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);
+  const ALLOWED_IMG=['image/jpeg','image/png','image/webp'];
+  const fileKind=f=>{const t=String(f.type||'').toLowerCase(),n=String(f.name||'').toLowerCase();if(t.startsWith('image/')||/\.(jpe?g|jfif|png|webp|heic|heif|gif|bmp|avif)$/.test(n))return 'image';if(t==='application/pdf'||n.endsWith('.pdf'))return 'pdf';return null};
+  const extMime=n=>({jpg:'image/jpeg',jpeg:'image/jpeg',jfif:'image/jpeg',png:'image/png',webp:'image/webp',pdf:'application/pdf'})[(String(n).toLowerCase().match(/\.([a-z0-9]+)$/)||[])[1]]||'';
+  const webviewNote=()=>/FBAN|FBAV|Instagram|Line\/|MicroMessenger|TikTok|Snapchat|Twitter|; wv\)/i.test(navigator.userAgent||'')?'<p class="msg error">⚠ Anda membuka website dari dalam aplikasi lain. Jika tombol unggah foto atau berkas tidak berfungsi, salin alamat website lalu buka lewat <b>Chrome</b> atau <b>Safari</b>.</p>':'';
+  async function drawToJpeg(file,maxSide=1600,quality=.82){
+    const big=file.size>3*1024*1024;
+    let bmp;
+    try{bmp=big?await createImageBitmap(file,{resizeWidth:1600,resizeQuality:'medium'}):await createImageBitmap(file)}
+    catch(e){bmp=await createImageBitmap(file)}
+    const s=Math.min(1,maxSide/Math.max(bmp.width,bmp.height));
+    const c=document.createElement('canvas');c.width=Math.max(1,Math.round(bmp.width*s));c.height=Math.max(1,Math.round(bmp.height*s));
+    c.getContext('2d').drawImage(bmp,0,0,c.width,c.height);
+    if(bmp.close)bmp.close();
+    const blob=await new Promise(r=>c.toBlob(r,'image/jpeg',quality));
+    if(!blob)throw new Error('Gagal membuat JPEG');
+    return new File([blob],String(file.name||'foto').replace(/\.[^.]+$/,'')+'.jpg',{type:'image/jpeg'});
+  }
   async function compressImage(file,maxSide=1600,quality=.82){
-    try{
-      const bmp=await createImageBitmap(file);
-      const s=Math.min(1,maxSide/Math.max(bmp.width,bmp.height));
-      const c=document.createElement('canvas');c.width=Math.max(1,Math.round(bmp.width*s));c.height=Math.max(1,Math.round(bmp.height*s));
-      c.getContext('2d').drawImage(bmp,0,0,c.width,c.height);
-      const blob=await new Promise(r=>c.toBlob(r,'image/jpeg',quality));
-      if(!blob||blob.size>=file.size)return file;
-      return new File([blob],file.name.replace(/\.[^.]+$/,'')+'.jpg',{type:'image/jpeg'});
-    }catch(e){return file}
+    try{const out=await drawToJpeg(file,maxSide,quality);return out.size<file.size?out:file}catch(e){return file}
   }
   async function prepareFile(file,opt={}){
     if(!file||!file.size)return null;
-    const isImg=/^image\//.test(file.type),isPdf=file.type==='application/pdf';
-    if(opt.image&&!isImg)throw new Error('Foto harus berupa gambar (JPG atau PNG).');
-    if(!isImg&&!isPdf)throw new Error(`Berkas "${file.name}" harus berupa gambar atau PDF.`);
-    const out=(isImg&&file.size>1.2*1024*1024)?await compressImage(file):file;
-    if(out.size>MAX_UPLOAD)throw new Error(`Ukuran "${file.name}" maksimal 8 MB.`);
+    const kind=fileKind(file),t=String(file.type||'').toLowerCase();
+    if(opt.image&&kind!=='image')throw new Error('Foto harus berupa gambar (JPG atau PNG).');
+    if(!kind)throw new Error(`Berkas "${file.name}" harus berupa gambar atau PDF.`);
+    let out=file;
+    if(kind==='pdf'){if(t!=='application/pdf')out=new File([file],file.name,{type:'application/pdf'})}
+    else{
+      const known=ALLOWED_IMG.includes(t)?t:extMime(file.name);
+      if(ALLOWED_IMG.includes(known)){
+        if(t!==known)out=new File([file],file.name,{type:known});
+        if(out.size>1.2*1024*1024)out=await compressImage(out);
+      }else{
+        try{out=await drawToJpeg(file,1600,.82)}
+        catch(e){throw new Error(`Foto "${file.name}" tidak bisa diproses di perangkat ini. Ambil foto langsung dengan kamera, atau simpan sebagai JPG lalu pilih lagi.`)}
+      }
+    }
+    if(out.size>MAX_UPLOAD)throw new Error(`Ukuran "${file.name}" ${(out.size/1048576).toFixed(1)} MB, maksimal 8 MB. Kecilkan resolusi foto atau pilih file yang lebih kecil.`);
     return out;
   }
   async function fetchAll(make){
@@ -293,7 +320,7 @@ function buildXlsx(sheets){
     if(!file) return null;
     if(file.size>8*1024*1024)throw new Error('Ukuran file maksimal 8 MB.');
     const safe=file.name.replace(/[^a-zA-Z0-9._-]/g,'_');const path=`${user.id}/${folder}/${crypto.randomUUID()}-${safe}`;
-    const {error}=await client.storage.from('private-files').upload(path,file,{upsert:false,contentType:file.type||'application/octet-stream'});
+    const {error}=await client.storage.from('private-files').upload(path,file,{upsert:false,contentType:file.type||extMime(file.name)||'application/octet-stream'});
     if(error)throw error;return path;
   }
   async function signedLink(path){if(!path)return '-';const {data,error}=await client.storage.from('private-files').createSignedUrl(path,300);if(error)return '-';return `<a class="file-link" target="_blank" rel="noopener" href="${data.signedUrl}">Lihat file</a>`}
@@ -323,7 +350,7 @@ function buildXlsx(sheets){
     $$('[data-delete-athlete]',root).forEach(b=>b.onclick=async()=>{if(!confirm('Hapus data atlet ini?'))return;const {error}=await client.from('athletes').delete().eq('id',b.dataset.deleteAthlete);if(error)notice(sayError(error),'error');else renderTab('athletes')});
   }
   function athleteForm(a={}){
-    openData(a.id?'Edit atlet':'Tambah atlet',`<div class="field-grid">${formField('Nama lengkap','full_name','text',true,`value="${escapeHTML(a.full_name||'')}"`)}${formField('NIK (16 digit)','nik','text',true,`inputmode="numeric" autocomplete="off" value="${escapeHTML(a.nik||'')}"`)}${formField('Tanggal lahir','birth_date','date',true,`value="${a.birth_date||''}"`)}${selectField('Jenis kelamin','gender',[['Putra','Putra'],['Putri','Putri']])}${formField('Berat badan (kg)','weight_kg','number',true,`step="0.1" min="10" max="150" value="${a.weight_kg||''}"`)}${selectField('Kategori','category',[['Tanding','Tanding'],['Tunggal','Tunggal'],['Ganda','Ganda'],['Regu','Regu']])}${formField('Nama pelatih','coach_name','text',false,`value="${escapeHTML(a.coach_name||'')}"`)}${formField('Nomor HP','phone','tel',false,`value="${escapeHTML(a.phone||'')}"`)}<label>Foto atlet${a.photo_path?' (sudah ada, pilih file untuk mengganti)':''}<input name="photo" type="file" accept="image/*"></label><label>Berkas persyaratan (KK / akta / kartu pelajar; gambar atau PDF)${a.document_path?' (sudah ada, pilih file untuk mengganti)':''}<input name="document" type="file" accept="image/*,.pdf"></label></div><p class="meta">Foto dan berkas maksimal 8 MB. Foto yang besar dikecilkan otomatis.</p>`,'athlete',a.id||null);
+    openData(a.id?'Edit atlet':'Tambah atlet',`<div class="field-grid">${formField('Nama lengkap','full_name','text',true,`value="${escapeHTML(a.full_name||'')}"`)}${formField('NIK (16 digit)','nik','text',true,`inputmode="numeric" autocomplete="off" value="${escapeHTML(a.nik||'')}"`)}${formField('Tanggal lahir','birth_date','date',true,`value="${a.birth_date||''}"`)}${selectField('Jenis kelamin','gender',[['Putra','Putra'],['Putri','Putri']])}${formField('Berat badan (kg)','weight_kg','number',true,`step="0.1" min="10" max="150" value="${a.weight_kg||''}"`)}${selectField('Kategori','category',[['Tanding','Tanding'],['Tunggal','Tunggal'],['Ganda','Ganda'],['Regu','Regu']])}${formField('Nama pelatih','coach_name','text',false,`value="${escapeHTML(a.coach_name||'')}"`)}${formField('Nomor HP','phone','tel',false,`value="${escapeHTML(a.phone||'')}"`)}<label>Foto atlet${a.photo_path?' (sudah ada, pilih file untuk mengganti)':''}<input name="photo" type="file" accept="image/*"></label><label>Berkas persyaratan (KK / akta / kartu pelajar; gambar atau PDF)${a.document_path?' (sudah ada, pilih file untuk mengganti)':''}<input name="document" type="file" accept="image/*,.pdf"></label></div><p class="meta">Foto dan berkas maksimal 8 MB. Foto yang besar dikecilkan otomatis.</p>${webviewNote()}`,'athlete',a.id||null);
     if(a.gender)dataForm.elements.gender.value=a.gender;if(a.category)dataForm.elements.category.value=a.category;
   }
   async function tabRegistrations(root,admin){
@@ -383,7 +410,7 @@ function buildXlsx(sheets){
     if(bill.total<=0){notice('Biaya pendaftaran belum ditetapkan panitia untuk kejuaraan ini. Hubungi panitia.','error');return}
     rows.forEach(r=>{if(r.group_code){if(seen.has(r.group_code))return;seen.add(r.group_code)}const k=r.competition_category||'-';(byCat[k]=byCat[k]||{n:0,fee:feeOf(cfg,r.competition_category)}).n++});
     const lines=Object.entries(byCat).map(([k,v])=>`<tr><td>${escapeHTML(k)}</td><td>${v.n} × ${rupiah(v.fee)}</td><td>${rupiah(v.n*v.fee)}</td></tr>`).join('');
-    openData(payId?'Kirim ulang bukti pembayaran':'Pembayaran keseluruhan',`<h4>${escapeHTML(ch.name||'')}</h4><div class="table-wrap"><table class="data-table"><thead><tr><th>Nomor</th><th>Rincian</th><th>Subtotal</th></tr></thead><tbody>${lines}<tr><td colspan="2"><b>Total yang dibayar</b></td><td><b>${rupiah(bill.total)}</b></td></tr></tbody></table></div><p class="meta">Transfer sesuai total di atas untuk seluruh atlet, lalu unggah bukti transfer.</p>${cfg.payment_info?`<div class="panel" style="white-space:pre-line"><b>Tujuan pembayaran</b><br>${escapeHTML(cfg.payment_info)}</div>`:'<p class="msg error">Informasi rekening belum diisi panitia. Hubungi panitia sebelum mentransfer.</p>'}<div class="field-grid">${formField('Nama pengirim / pemilik rekening','sender_name','text',true,`value="${escapeHTML(profile?.manager_name||'')}"`)}${formField('Tanggal transfer','paid_at','date',true,`value="${todayISO()}"`)}<label>Bukti transfer (gambar atau PDF)<input name="proof" type="file" accept="image/*,.pdf" required></label></div>`,payId?'payment-resubmit':'payment',payId||ch.id);
+    openData(payId?'Kirim ulang bukti pembayaran':'Pembayaran keseluruhan',`<h4>${escapeHTML(ch.name||'')}</h4><div class="table-wrap"><table class="data-table"><thead><tr><th>Nomor</th><th>Rincian</th><th>Subtotal</th></tr></thead><tbody>${lines}<tr><td colspan="2"><b>Total yang dibayar</b></td><td><b>${rupiah(bill.total)}</b></td></tr></tbody></table></div><p class="meta">Transfer sesuai total di atas untuk seluruh atlet, lalu unggah bukti transfer.</p>${webviewNote()}${cfg.payment_info?`<div class="panel" style="white-space:pre-line"><b>Tujuan pembayaran</b><br>${escapeHTML(cfg.payment_info)}</div>`:'<p class="msg error">Informasi rekening belum diisi panitia. Hubungi panitia sebelum mentransfer.</p>'}<div class="field-grid">${formField('Nama pengirim / pemilik rekening','sender_name','text',true,`value="${escapeHTML(profile?.manager_name||'')}"`)}${formField('Tanggal transfer','paid_at','date',true,`value="${todayISO()}"`)}<label>Bukti transfer (gambar atau PDF)<input name="proof" type="file" accept="image/*,.pdf" required></label></div>`,payId?'payment-resubmit':'payment',payId||ch.id);
   }
   async function repayForm(payId){
     const {data,error}=await client.from('registrations').select('*, championships(id,name,competition_config)').eq('payment_id',payId);
@@ -464,7 +491,7 @@ function buildXlsx(sheets){
     let entries=[newEntry()];
     const cfgOf=()=>effectiveConfig(event?.competition_config);
     const opts=events.map(x=>`<option value="${x.id}" ${event&&x.id===event.id?'selected':''}>${escapeHTML(x.name)}</option>`).join('');
-    openData('Pendaftaran peserta',`<div class="field-grid"><label>Kejuaraan<select name="championship_id" required><option value="">Pilih kejuaraan</option>${opts}</select></label>${formField('Nama pelatih / pendamping (opsional)','coach_name','text',false,'')}${formField('Nomor HP pelatih / manajer (opsional)','phone','tel',false,`value="${escapeHTML(profile?.phone||'')}"`)}</div><p class="meta">Isi data peserta lengkap: nomor pertandingan, kelompok usia, kelas tanding, NIK, foto, dan berkas persyaratan. Klik <b>+ Tambah peserta</b> untuk mendaftarkan banyak peserta sekaligus, lalu tekan Simpan satu kali.</p><div id="regEntries"></div><div class="reg-actions"><button type="button" class="btn ghost sm" id="addEntry">+ Tambah peserta</button><span class="meta" id="regCount"></span></div>`,'registration-multi');
+    openData('Pendaftaran peserta',`<div class="field-grid"><label>Kejuaraan<select name="championship_id" required><option value="">Pilih kejuaraan</option>${opts}</select></label>${formField('Nama pelatih / pendamping (opsional)','coach_name','text',false,'')}${formField('Nomor HP pelatih / manajer (opsional)','phone','tel',false,`value="${escapeHTML(profile?.phone||'')}"`)}</div><p class="meta">Isi data peserta lengkap: nomor pertandingan, kelompok usia, kelas tanding, NIK, foto, dan berkas persyaratan. Klik <b>+ Tambah peserta</b> untuk mendaftarkan banyak peserta sekaligus, lalu tekan Simpan satu kali.</p>${webviewNote()}<div id="regEntries"></div><div class="reg-actions"><button type="button" class="btn ghost sm" id="addEntry">+ Tambah peserta</button><span class="meta" id="regCount"></span></div>`,'registration-multi');
     const box=$('#regEntries'),champSel=dataForm.elements.championship_id;
     const optList=(arr,sel,ph)=>`<option value="">${ph}</option>`+arr.map(v=>`<option value="${escapeHTML(v[0])}" ${String(v[0])===String(sel)?'selected':''}>${escapeHTML(v[1])}</option>`).join('');
     const classRange=w=>{const lo=parseFloat(w.min_kg),hi=parseFloat(w.max_kg);return(Number.isFinite(lo)&&Number.isFinite(hi))?[lo,hi]:null};
@@ -497,7 +524,7 @@ function buildXlsx(sheets){
         if(needsClass(e.category)&&!e.weightTouched){const s=suggestClass(m.bb);if(s)e.weight=s.name}paint();return}
       if(f==='photo'||f==='doc'){
         const file=(t.files&&t.files[0])||null,small=t.parentElement.querySelector('small');
-        if(file&&!(f==='photo'?/^image\//.test(file.type):(/^image\//.test(file.type)||file.type==='application/pdf'))){t.value='';m[f]=null;if(small)small.textContent=f==='photo'?'Format tidak didukung. Pilih gambar (JPG atau PNG).':'Format tidak didukung. Pilih gambar atau PDF.';return}
+        if(file&&!(f==='photo'?fileKind(file)==='image':!!fileKind(file))){t.value='';m[f]=null;if(small)small.textContent=f==='photo'?'Format tidak didukung. Pilih gambar (JPG atau PNG).':'Format tidak didukung. Pilih gambar atau PDF.';return}
         m[f]=file;
         if(small)small.textContent=file?`✓ ${file.name} (${Math.max(1,Math.round(file.size/1024))} KB)`:(m.saved&&m.saved[f]?'✓ sudah tersimpan':'Belum dipilih');
         return;
@@ -637,7 +664,7 @@ function buildXlsx(sheets){
         const fees={};$$('input[data-fee-cat]',dataForm).forEach(i=>{if(categories.includes(i.dataset.feeCat)){const v=Number(i.value);fees[i.dataset.feeCat]=Number.isFinite(v)&&v>0?Math.round(v):0}});
         payload.competition_config={ruleset,categories,age_groups:ageGroups,weight_classes:weightClasses,fees,payment_info:String(payload.payment_info||'').trim()};delete payload.payment_info;delete payload.ruleset;delete payload.event_categories;delete payload.event_ages;delete payload.weight_classes;delete payload.flyer_file;delete payload.guide_file;
         let saved;if(editingId){({data:saved,error}=await client.from('championships').update(payload).eq('id',editingId).select('id').single())}else{({data:saved,error}=await client.from('championships').insert(payload).select('id').single())}if(error)throw error;
-        for(const [field,col] of [['flyer_file','flyer_path'],['guide_file','technical_guide_path']]){const file=fd.get(field);if(file?.size){if(file.size>12*1024*1024)throw new Error('Ukuran flyer/juknis maksimal 12 MB.');const safe=file.name.replace(/[^a-zA-Z0-9._-]/g,'_');const path=`${saved.id}/${col}/${crypto.randomUUID()}-${safe}`;const {error:upErr}=await client.storage.from('championship-assets').upload(path,file,{upsert:false,contentType:file.type||'application/octet-stream'});if(upErr)throw upErr;const {error:updateErr}=await client.from('championships').update({[col]:path}).eq('id',saved.id);if(updateErr)throw updateErr}}
+        for(const [field,col] of [['flyer_file','flyer_path'],['guide_file','technical_guide_path']]){const file=fd.get(field);if(file?.size){if(file.size>12*1024*1024)throw new Error('Ukuran flyer/juknis maksimal 12 MB.');const safe=file.name.replace(/[^a-zA-Z0-9._-]/g,'_');const path=`${saved.id}/${col}/${crypto.randomUUID()}-${safe}`;const {error:upErr}=await client.storage.from('championship-assets').upload(path,file,{upsert:false,contentType:file.type||extMime(file.name)||'application/octet-stream'});if(upErr)throw upErr;const {error:updateErr}=await client.from('championships').update({[col]:path}).eq('id',saved.id);if(updateErr)throw updateErr}}
       } else if(editingType==='payment'||editingType==='payment-resubmit'){
         const file=await prepareFile(fd.get('proof'));if(!file)throw new Error('Pilih file bukti transfer.');
         const sender=String(payload.sender_name||'').trim();if(!sender)throw new Error('Isi nama pengirim.');
